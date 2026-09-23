@@ -33,11 +33,6 @@ public class BuildingHealth : MonoBehaviour
         rb.AddForce(pushDir.normalized * 6f, ForceMode.VelocityChange);
         rb.AddTorque(new Vector3(pushDir.z, 0f, -pushDir.x) * 4f, ForceMode.VelocityChange);
 
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.AddScore(5);
-        }
-
         Destroy(gameObject, 6f);
     }
 }
