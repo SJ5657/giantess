@@ -37,6 +37,10 @@ public class GiantSaveData
     public bool hasCitySeed;
     public int citySeed;
     public int cagedHostageCount;
+
+    // Which body the player picked on the start screen (see PlayerGender). Saves made before
+    // this field existed load as 0 = Female, which is what the game always used back then.
+    public int gender;
 }
 
 // Simple JSON-file-based save/load for up to 4 slots, written under
@@ -133,6 +137,8 @@ public static class SaveSystem
             }
         }
 
+        data.gender = (int)PlayerModelSwitcher.Current;
+
         data.hasCitySeed = true;
         data.citySeed = CityGenerator.LastUsedSeed;
 
@@ -151,6 +157,14 @@ public static class SaveSystem
         if (giantObj == null) return;
 
         GiantController giant = giantObj.GetComponent<GiantController>();
+
+        // Restore which body (male/female) this slot was saved with before anything else, so the
+        // Animator the controller drives is already the right one by the time it resumes.
+        PlayerModelSwitcher modelSwitcher = giantObj.GetComponent<PlayerModelSwitcher>();
+        if (modelSwitcher != null)
+        {
+            modelSwitcher.Apply((PlayerGender)data.gender);
+        }
 
         // Rebuild the exact map/citizens this slot was saved with FIRST -- before touching the
         // giant's position at all -- then re-cage the right number of hostages. This order

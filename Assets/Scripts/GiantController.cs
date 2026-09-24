@@ -300,6 +300,26 @@ public class GiantController : MonoBehaviour
         UpdateHostageUI();
     }
 
+    // Called by PlayerModelSwitcher when the player picks a different body (male/female) on the
+    // start screen or from a save. Points the controller at the new body's Animator and throws
+    // away everything that was looked up from the old body's skeleton (hand hold point and
+    // the grip/torso bones), so it is re-resolved lazily from the new one.
+    public void SetModelAnimator(Animator newAnimator)
+    {
+        animator = newAnimator;
+        handHoldPoint = null;
+        gripBonesResolved = false;
+        gripHandBone = null;
+        gripIndexBone = null;
+        gripMiddleBone = null;
+        gripRingBone = null;
+        gripLittleBone = null;
+        gripChestBone = null;
+        gripUpperArmBone = null;
+        gripLowerArmBone = null;
+        gripHeadBone = null;
+    }
+
     void Update()
     {
         // Ignore all input until the game has actually started -- otherwise the mouse click

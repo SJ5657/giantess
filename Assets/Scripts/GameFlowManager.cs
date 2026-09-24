@@ -17,6 +17,16 @@ public class GameFlowManager : MonoBehaviour
     [Tooltip("Intentionally left with no click behavior for now.")]
     public Button startExitButton;
 
+    [Header("Gender Select")]
+    [Tooltip("Shown after clicking Start Game: lets the player pick which character to play. Hidden on launch.")]
+    public GameObject genderSelectPanel;
+    public Button femaleButton;
+    public Button maleButton;
+    [Tooltip("Goes back from the gender screen to the start screen.")]
+    public Button genderBackButton;
+    [Tooltip("Auto-found if left empty.")]
+    public PlayerModelSwitcher modelSwitcher;
+
     [Header("Save / Load")]
     [Tooltip("Auto-found if left empty.")]
     public SaveSlotPanel saveSlotPanel;
@@ -47,9 +57,35 @@ public class GameFlowManager : MonoBehaviour
             saveSlotPanel = FindObjectOfType<SaveSlotPanel>();
         }
 
+        if (modelSwitcher == null)
+        {
+            modelSwitcher = FindObjectOfType<PlayerModelSwitcher>();
+        }
+
+        if (genderSelectPanel != null)
+        {
+            genderSelectPanel.SetActive(false);
+        }
+
         if (startGameButton != null)
         {
-            startGameButton.onClick.AddListener(StartGame);
+            // Start Game now opens the gender picker first; the picker's buttons call StartGameAs().
+            startGameButton.onClick.AddListener(OnStartGameClicked);
+        }
+
+        if (femaleButton != null)
+        {
+            femaleButton.onClick.AddListener(() => StartGameAs(PlayerGender.Female));
+        }
+
+        if (maleButton != null)
+        {
+            maleButton.onClick.AddListener(() => StartGameAs(PlayerGender.Male));
+        }
+
+        if (genderBackButton != null)
+        {
+            genderBackButton.onClick.AddListener(CloseGenderSelect);
         }
 
         if (startOptionsButton != null)
@@ -59,6 +95,53 @@ public class GameFlowManager : MonoBehaviour
 
         // startExitButton: no listener is wired on purpose — per the current request,
         // clicking it does nothing yet.
+    }
+
+    // Start Game button: swap the start screen for the gender picker. Falls back to starting
+    // right away (as before) if the picker panel was never assigned.
+    void OnStartGameClicked()
+    {
+        if (genderSelectPanel == null)
+        {
+            StartGame();
+            return;
+        }
+
+        if (startScreenPanel != null)
+        {
+            startScreenPanel.SetActive(false);
+        }
+
+        genderSelectPanel.SetActive(true);
+    }
+
+    void CloseGenderSelect()
+    {
+        if (genderSelectPanel != null)
+        {
+            genderSelectPanel.SetActive(false);
+        }
+
+        if (startScreenPanel != null)
+        {
+            startScreenPanel.SetActive(true);
+        }
+    }
+
+    // Applies the chosen body, then runs the normal fresh-game start-up.
+    public void StartGameAs(PlayerGender gender)
+    {
+        if (modelSwitcher != null)
+        {
+            modelSwitcher.Apply(gender);
+        }
+
+        if (genderSelectPanel != null)
+        {
+            genderSelectPanel.SetActive(false);
+        }
+
+        StartGame();
     }
 
     void OpenLoadPanel()
