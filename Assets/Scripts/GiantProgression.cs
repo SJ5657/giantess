@@ -25,8 +25,15 @@ public class GiantProgression : MonoBehaviour
     public TMP_Text skillPointText;
     public Image xpFillImage;
 
+    [Tooltip("Minimum gap (in canvas units) kept between the XP bar and each side of the screen when the window is narrower than the bar's designed width.")]
+    public float xpBarScreenMargin = 20f;
+
     private RectTransform xpFillRect;
     private float xpFillMaxWidth;
+    private RectTransform xpBarRect;
+    private RectTransform canvasRect;
+    private float xpBarDesignWidth;
+    private float xpFillInset;
 
     void Awake()
     {
@@ -39,9 +46,42 @@ public class GiantProgression : MonoBehaviour
         {
             xpFillRect = xpFillImage.rectTransform;
             xpFillMaxWidth = xpFillRect.sizeDelta.x;
+
+            // Remember the bar's designed width so it can be shrunk to fit narrow screens (it is a
+            // fixed-width element, which used to run off the edge of the screen in small windows).
+            xpBarRect = xpFillRect.parent as RectTransform;
+            if (xpBarRect != null)
+            {
+                xpBarDesignWidth = xpBarRect.sizeDelta.x;
+                xpFillInset = xpBarDesignWidth - xpFillMaxWidth;
+                Canvas c = xpBarRect.GetComponentInParent<Canvas>();
+                if (c != null) canvasRect = c.rootCanvas.transform as RectTransform;
+            }
         }
 
         UpdateUI();
+    }
+
+    // Keeps the XP bar within the screen: at its designed width when there's room, otherwise
+    // narrowed to the canvas width minus a margin on each side. Runs every frame because the
+    // canvas size changes whenever the game window is resized.
+    void LateUpdate()
+    {
+        if (xpBarRect == null || canvasRect == null || xpBarDesignWidth <= 0f) return;
+
+        // Divide by the bar's own scale so the on-screen width (width * scale) is what's fitted.
+        float available = (canvasRect.rect.width - xpBarScreenMargin * 2f) / Mathf.Max(0.01f, xpBarRect.localScale.x);
+        if (available <= 0f) return;
+        float width = Mathf.Min(xpBarDesignWidth, available);
+
+        if (!Mathf.Approximately(xpBarRect.sizeDelta.x, width))
+        {
+            Vector2 size = xpBarRect.sizeDelta;
+            size.x = width;
+            xpBarRect.sizeDelta = size;
+            xpFillMaxWidth = Mathf.Max(0f, width - xpFillInset);
+            UpdateUI();
+        }
     }
 
     // How much XP is needed to go from the given level to the next one. Compounds by

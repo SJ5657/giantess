@@ -304,9 +304,53 @@ public class GiantController : MonoBehaviour
     // start screen or from a save. Points the controller at the new body's Animator and throws
     // away everything that was looked up from the old body's skeleton (hand hold point and
     // the grip/torso bones), so it is re-resolved lazily from the new one.
+    // The manually-placed grab anchor (grabAnchorOverride) is a child of ONE model's right hand.
+    // When the other model is active, mirror it under that model's own hand (same local
+    // placement) so held targets follow the visible hand instead of the hidden model's.
+    float pendingLeftSince = -1f;
+    float releaseInputBlockUntil;
+    float lastRightDownTime = -10f;
+    const float releaseComboWindow = 0.15f;
+
+    Transform originalGrabAnchor;
+    Animator originalGrabAnchorOwner;
+
+    void SwapGrabAnchor(Animator newAnimator)
+    {
+        if (originalGrabAnchor == null && grabAnchorOverride != null)
+        {
+            originalGrabAnchor = grabAnchorOverride;
+            originalGrabAnchorOwner = originalGrabAnchor.GetComponentInParent<Animator>(true);
+        }
+        if (originalGrabAnchor == null || newAnimator == null) return;
+
+        if (newAnimator == originalGrabAnchorOwner)
+        {
+            grabAnchorOverride = originalGrabAnchor;
+            return;
+        }
+
+        Transform hand = newAnimator.isHuman ? newAnimator.GetBoneTransform(HumanBodyBones.RightHand) : null;
+        if (hand == null) return;
+
+        Transform existing = hand.Find(originalGrabAnchor.name);
+        if (existing == null)
+        {
+            GameObject go = new GameObject(originalGrabAnchor.name);
+            existing = go.transform;
+            existing.SetParent(hand, false);
+            existing.localPosition = originalGrabAnchor.localPosition;
+            existing.localRotation = originalGrabAnchor.localRotation;
+            existing.localScale = originalGrabAnchor.localScale;
+        }
+        grabAnchorOverride = existing;
+    }
+
+
     public void SetModelAnimator(Animator newAnimator)
     {
         animator = newAnimator;
+        SwapGrabAnchor(newAnimator);
         handHoldPoint = null;
         gripBonesResolved = false;
         gripHandBone = null;
@@ -457,6 +501,38 @@ public class GiantController : MonoBehaviour
         }
     }
 
+    // The action a plain (uncombined) left click performs while something is held.
+    void PerformHeldLeftClick()
+    {
+        if (heldTarget == null) return;
+
+        if (heldIsHostage && IsHeldTargetNearCage())
+        {
+            // Close enough to the birdcage -- left click locks the held hostage into the
+            // cage instead of eating/releasing them.
+            CageHeldTarget();
+        }
+        else if (IsPersonTransform(heldTarget))
+        {
+            // A tiny person/soldier, not near the cage -- left click eats them (see
+            // EatRoutine).
+            StartCoroutine(EatRoutine(heldTarget));
+        }
+        else if (IsCarTransform(heldTarget))
+        {
+            // A held car -- left click hoists it overhead and shakes the driver out into
+            // the giant's mouth instead of just dropping it (see CarEatRoutine). The car
+            // itself stays held afterward.
+            StartCoroutine(CarEatRoutine(heldTarget));
+        }
+        else
+        {
+            // A held tank/helicopter/other vehicle (no car-eat spectacle for these) --
+            // left click just lets go of it.
+            ReleaseHeldTarget();
+        }
+    }
+
     // Left click alone -> attackTrigger (Attack02) animation, but the actual effect at impact
     // is now a grab (whichever tiny person/soldier is directly underneath the giant), not damage.
     // If already holding someone, left click instead either cages them (if close enough to the
@@ -482,6 +558,13 @@ public class GiantController : MonoBehaviour
             return;
         }
 
+        // Just let go of something: ignore mouse/attack input for a moment so the clicks that
+        // did the releasing can't also trigger a punch, grab, throw or eat.
+        if (Time.unscaledTime < releaseInputBlockUntil)
+        {
+            return;
+        }
+
         bool leftDown = Input.GetMouseButtonDown(0);
         bool rightDown = Input.GetMouseButtonDown(1);
 
@@ -497,6 +580,22 @@ public class GiantController : MonoBehaviour
 
         if (heldTarget != null)
         {
+            if (pendingLeftSince >= 0f)
+            {
+                if (Input.GetMouseButton(1) || rightDown)
+                {
+                    // Left then right within the window: let go, and nothing else.
+                    ReleaseHeldTarget();
+                    return;
+                }
+                if (Time.unscaledTime - pendingLeftSince >= releaseComboWindow)
+                {
+                    pendingLeftSince = -1f;
+                    PerformHeldLeftClick();
+                }
+                return;
+            }
+
             // Holding something -- mouse is entirely about what to do with it: aim+throw
             // (right held + left click), let go (both clicked together), cage (left click near
             // the birdcage), or eat (left click otherwise -- people get the hand-to-mouth
@@ -542,9 +641,19 @@ public class GiantController : MonoBehaviour
                 Vector3 previewDir = (previewAimPoint - previewOrigin).normalized;
                 trajectoryPreview.Show(previewOrigin, previewDir, throwSpeed, throwGravity, transform, heldTarget);
 
+                if (rightDown) lastRightDownTime = Time.unscaledTime;
                 if (leftDown)
                 {
-                    ThrowHeldTarget();
+                    // Both buttons pressed together (same frame, or right followed by left within a
+                    // few frames) means 'let go', not 'aim + throw'.
+                    if (Time.unscaledTime - lastRightDownTime <= releaseComboWindow)
+                    {
+                        ReleaseHeldTarget();
+                    }
+                    else
+                    {
+                        ThrowHeldTarget();
+                    }
                 }
                 return;
             }
@@ -565,31 +674,9 @@ public class GiantController : MonoBehaviour
                 return;
             }
 
-            if (heldIsHostage && IsHeldTargetNearCage())
-            {
-                // Close enough to the birdcage -- left click locks the held hostage into the
-                // cage instead of eating/releasing them.
-                CageHeldTarget();
-            }
-            else if (IsPersonTransform(heldTarget))
-            {
-                // A tiny person/soldier, not near the cage -- left click eats them (see
-                // EatRoutine).
-                StartCoroutine(EatRoutine(heldTarget));
-            }
-            else if (IsCarTransform(heldTarget))
-            {
-                // A held car -- left click hoists it overhead and shakes the driver out into
-                // the giant's mouth instead of just dropping it (see CarEatRoutine). The car
-                // itself stays held afterward.
-                StartCoroutine(CarEatRoutine(heldTarget));
-            }
-            else
-            {
-                // A held tank/helicopter/other vehicle (no car-eat spectacle for these) --
-                // left click just lets go of it.
-                ReleaseHeldTarget();
-            }
+            // A lone left click is held back for a moment: if the right button joins it, the player
+            // meant 'let go' -- not 'eat/cage' followed by something else.
+            pendingLeftSince = Time.unscaledTime;
             return;
         }
 
@@ -963,6 +1050,7 @@ public class GiantController : MonoBehaviour
     void AttachToHand(Transform target)
     {
         heldTarget = target;
+        pendingLeftSince = -1f;
 
         if (grabIndicator != null)
         {
@@ -1047,6 +1135,18 @@ public class GiantController : MonoBehaviour
 
         Transform released = heldTarget;
         heldTarget = null;
+        pendingLeftSince = -1f;
+        releaseInputBlockUntil = Time.unscaledTime + 0.35f;
+
+        // Leave aim mode too -- the held-target branch that normally clears aiming state stops
+        // running once nothing is held, so without this the aim pose/camera would stay stuck.
+        isAiming = false;
+        throwLeanHoldTimer = 0f;
+        if (animator != null) animator.SetBool("Aiming", false);
+        ThirdPersonCamera aimCamRef = GetCam();
+        if (aimCamRef != null) aimCamRef.SetAiming(false);
+        if (trajectoryPreview != null) trajectoryPreview.Hide();
+        if (aimMarker != null && aimMarker.activeSelf) aimMarker.SetActive(false);
 
         FinalizeRelease(released);
 
@@ -1505,7 +1605,12 @@ public class GiantController : MonoBehaviour
 
         if (car != null)
         {
-            SpawnAndEatCarPassenger(car);
+            // Only the first time -- once a car has been emptied it has no driver left.
+            if (car.GetComponent<CarEmptied>() == null)
+            {
+                car.gameObject.AddComponent<CarEmptied>();
+                SpawnAndEatCarPassenger(car);
+            }
         }
 
         yield return new WaitForSeconds(carLiftHoldDuration);
@@ -1633,6 +1738,20 @@ public class GiantController : MonoBehaviour
     // position is wherever the throw landed).
     void FinalizeRelease(Transform released)
     {
+        // A car whose driver was already eaten: park it where it lands (no driving off, no
+        // falling-and-resuming), then let it disappear after a while.
+        CarEmptied emptiedCar = released.GetComponent<CarEmptied>();
+        if (emptiedCar != null)
+        {
+            released.SetParent(null, true);
+            Vector3 parkPos = released.position;
+            parkPos.y = 0.1f;
+            released.position = parkPos;
+            released.rotation = Quaternion.Euler(0f, released.eulerAngles.y, 0f);
+            emptiedCar.BeginAbandoned();
+            return;
+        }
+
         // Ambient traffic cars get a softer, distinct landing (see TrafficCarAI.BeginDrop): a
         // gentle fall instead of snapping straight to the road if there's still height left to
         // cover, colliders held off through a brief stunned pause (so landing right at the
@@ -2189,6 +2308,18 @@ public class GiantController : MonoBehaviour
                 {
                     heli.TakeDamage(damage);
                     if (knockback) heli.ApplyKnockback(KnockbackDirTo(heli.transform.position) * attackKnockbackForce);
+                }
+                continue;
+            }
+
+            // Ambient traffic cars normally ignore punches, but one whose driver the giant already
+            // ate (see CarEmptied) is just an abandoned wreck -- any punch destroys it.
+            TrafficCarAI wreck = col.GetComponentInParent<TrafficCarAI>();
+            if (wreck != null && wreck.GetComponent<CarEmptied>() != null)
+            {
+                if (hitTargets.Add(wreck))
+                {
+                    wreck.Squash();
                 }
                 continue;
             }

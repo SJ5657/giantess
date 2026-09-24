@@ -146,6 +146,7 @@ public class SaveSlotPanel : MonoBehaviour
         box.pivot = new Vector2(0.5f, 0.5f);
         box.anchoredPosition = Vector2.zero;
         box.sizeDelta = new Vector2(520f, 460f);
+        box.localScale = Vector3.one * UiScale.Menu;
         Image boxImg = box.gameObject.AddComponent<Image>();
         boxImg.color = BoxColor;
 
